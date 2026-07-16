@@ -53,10 +53,15 @@ class BatchExporter:
                     for file_name in os.listdir(sub_path):
                         if self.file_type in file_name:
                             file_path = sub_path + "\\" + file_name
+                            # name = "001_高春峰"
+                            # name = "1015陈英琢"
+                            name = "1135毛晓燕"
+                            if name in file_name:
                             # self.UIController.process(file_path)
-                            print(self.UIController.process(file_path))
-                            return
-
+                                self.UIController.process(file_path)
+                                # return
+                                self.UIController.clear()
+                                return
     def close(self):
         """
         关不关都无所谓，不差这个
