@@ -2,6 +2,8 @@ from util import *
 import win32api
 import pyperclip
 import time
+import traceback
+import re
 
 class UIController:
     def __init__(self, dlg):
@@ -9,42 +11,79 @@ class UIController:
         self.dlg = dlg
         self.main_handle = dlg.handle
         # 可以清除
+        self.current_type = None
+        self.current_name = None
         self.current_path = None
         self.hwnd_dict = {
             "handle":[],
             "name":[],
             "snapshot":[]
         }
+        self.name_list = []
+        self.rename_list = []
         # 只读，无须清除
-        self.eye_imp_path = "icon/eye.png"
-        self.search_imp_path = "icon/search.png"
+        self.eye_imp_path = "icon/_eye.png"
+        self.search_imp_path = "icon/_search.png"
+        self.group_dict = {
+            "ScanPost": "icon/group-ScanPost.png",
+        }
+        self.white_dict = {
+            "A": False,
+            "S": "icon/txt-ScanModel.png",
+            "ScanPost": False,
+            "G": "icon/txt-Gingiva.png",
+            "E": False,
+        }
+        self.name_key_dict = {
+            "A": False,
+            "S": False,
+            "ScanPost": "icon/name-ScanPost.png",
+            "G": False,
+            "E": False,
+        }
+        self.database_dict = {
+            "数据库模型信息": "牙形数据库",
+            "植体替代体配置信息": "种植体数据库",
+        }
+        self.black_dict = {}
         self.pop_timeout = 1.0 # 窗口更新
         self.clear_timeout = 2.0  # 窗口更新
         self.load_timeout = 60.0 # 数据加载
         self.you_have_to_wait = 0.25 # 我没辙了
+        self.wait_menu_done = 0.25  # 我没辙了
         self.wait_load_done = 0.5  # 加载延迟
         self.wait_ui_done = 0.5  # UI更新
         self.wait_click_done = 0.15  # 点击延迟
         self.close_bias = (0, -10)
         self.hide_all_bias = (-120, -20)
+        self.eye_click_bias = (40, 0)
         self.eye_bar_bias = (25, 20, 55, -20)
-        self.eye_click_bias = (30, 0)
         self.search_bar_bias = (0, 0, 60, 0)
-        self.black_list = []
+        self.full_bias = (0, 0, -1, 0)
 
-    def process(self, current_path):
+
+    def process(self, current_path, current_name):
         """
         跑一遍流程
         """
         self.current_path = current_path
+        self.current_name = current_name
         if not self.load():
             return False
-        # if not self.hide_all():
+        if not self.hide_all():
+            return False
+        if not self.key_judge(ord("M")): # M for Merged parts 合并
+            return False
+        # if not self.to_save(key="A"): # A for Antagonist 对颌牙
         #     return False
-        # if not self.key_judge(ord("M")): # Merge 合并
+        # if not self.to_save(key="S"): # S for Jaw Scans 扫描模型
         #     return False
-        # if not self.right_menu(ord("A")): # Articulation 我猜的，对颌牙
+        # if not self.to_save(group="ScanPost", name_from_database="数据库模型信息"): # 没有对应快捷键 扫描杆
         #     return False
+        # if not self.to_save(key="G"): # G for Gingiva scans 牙龈扫描
+        #     return False
+        if not self.to_save(key="E"): # E for Anatomic parts 解剖形态
+            return False
         return True
 
 
@@ -73,7 +112,6 @@ class UIController:
 
 
             pop_hwnd = win32gui.GetForegroundWindow() # 等待弹窗
-            print_window_tree(pop_hwnd)
             self.append_handle(pop_hwnd)
             self.keyboard(pop_hwnd,
                           VK_RETURN) # Enter 确认
@@ -87,9 +125,10 @@ class UIController:
                         if win32gui.GetWindowText(current_handle) == "向导": # 项目基本加载完了
                             time.sleep(self.wait_load_done)
                             return True
+            log("load: time out")
             return False
         except Exception as e:
-            print(e)
+            log("class UIController.load Error\n",traceback.format_exc())
             return False
 
     def hide_all(self):
@@ -112,7 +151,7 @@ class UIController:
                     break
             return True
         except Exception as e:
-            print(e)
+            log("class UIController.hide_all Error\n",traceback.format_exc())
             return False
 
     def key_judge(self, key):
@@ -132,15 +171,12 @@ class UIController:
             self.keyboard(handle,
                           key)
             time.sleep(self.wait_ui_done)
-            if result["found"]:
-                return result
-            else:
-                return False
+            return result
         except Exception as e:
-            print(e)
+            log("class UIController.key_judge Error\n",traceback.format_exc())
             return False
 
-    def right_menu(self, key):
+    def to_save(self, key = None, group = None, name_from_database = None):
         """
         点击 键盘对应按键
         如果对应小眼睛亮了，说明有数据
@@ -153,78 +189,190 @@ class UIController:
         try:
             show_hide_handle = self.handle_named("显示/隐藏组")
             current_root_handle = win32gui.GetForegroundWindow()
-            eye_result = self.key_judge(key)
+            self.name_list = []
+            if key is not None:
+                eye_result = self.key_judge(ord(key))
+                self.current_type = key
+            elif group is not None:
+                eye_result = self.match(show_hide_handle,
+                                        self.full_bias,
+                                        self.group_dict[group])
+                self.current_type = group
+            else:
+                self.current_type = None
+                log("to_save: no key no group")
+                return False
             assume_one_task = True
-            assume_task_num = 1
+            assume_task = [1]
             loop_num = 0
             if type(eye_result) == dict:
                 pos = eye_result["center"]
-                while loop_num < assume_task_num:
-                    self.click(show_hide_handle,
-                               (pos[0] + self.eye_click_bias[0],
-                                pos[1] + self.eye_click_bias[1]), button = "right", back = False)
-
-                    current_handle = None
-                    start = time.time()
-                    while time.time() - start < self.pop_timeout:
-                        current_handle = win32gui.GetForegroundWindow()
-                        if (current_handle != current_root_handle
-                                and current_handle != show_hide_handle):
-                            break
-
-                    if current_handle:
-                        pyperclip.copy("功能菜单")
-                        self.keyboard(current_handle,
+                if name_from_database is not None:
+                    right_call_handle = self.call_right_menu(show_hide_handle,  # 右键，唤起右键菜单
+                                                          pos,
+                                                          [show_hide_handle, current_root_handle])
+                    if right_call_handle:
+                        pyperclip.copy(name_from_database) # 搜索功能菜单
+                        self.keyboard(right_call_handle,
                                       VK_CONTROL, ord("V"))
                         time.sleep(self.wait_ui_done)
-
-                        before = get_all_top_hwnds()
-
-                        self.keyboard(current_handle,
+                        self.keyboard(right_call_handle,
                                       VK_RETURN)
-                        time.sleep(self.wait_ui_done)
-
-                        after = get_all_top_hwnds()
-                        new_handles = after - before
-                        target_hwnd = None
-                        search_result = {}
-                        task_height = None
-                        for hwnd in new_handles:
-                            rect = win32gui.GetWindowRect(hwnd)
-                            width = rect[2] - rect[0]
-                            height = rect[3] - rect[1]
-                            title = win32gui.GetWindowText(hwnd)
-                            if width > 100 and height > 50 and title == "": # 很怪 但是这个判断方式确实不错
-                                search_result = self.match(hwnd, # 单个数据
-                                           self.search_bar_bias,
-                                           self.search_imp_path)
-                                target_hwnd = hwnd
-                                task_height = height
+                        start = time.time()
+                        data = None
+                        while time.time() - start < self.pop_timeout:
+                            current_handle = win32gui.GetForegroundWindow()
+                            if win32gui.GetWindowText(current_handle) == self.database_dict[name_from_database]:
+                                self.keyboard(current_handle,
+                                              VK_CONTROL, ord("C"))
+                                time.sleep(self.wait_click_done)
+                                data = pyperclip.paste()
+                                self.keyboard(current_handle,
+                                              VK_RETURN)
                                 break
-                        if target_hwnd is None or search_result is {}:
+                        self.name_list = self.get_name_list(data)
+                while loop_num < len(assume_task):
+                    right_call_handle = self.call_right_menu(show_hide_handle, # 右键，唤起右键菜单
+                                                          pos,
+                                                          [show_hide_handle, current_root_handle])
+                    if right_call_handle:
+                        time.sleep(self.wait_click_done)
+                        pyperclip.copy("功能菜单") # 搜索功能菜单
+                        self.keyboard(right_call_handle,
+                                      VK_CONTROL, ord("V"))
+                        time.sleep(self.wait_ui_done)
+                        target_hwnd, search_result, task_top, task_bottom = self.check_new_pop(right_call_handle) # 点击，检测新窗口
+                        if target_hwnd is None and search_result is None:
+                            log("to_save: no target_hwnd no search_result")
                             return False
                         else:
-                            loop_num += 1
                             if assume_one_task:
-                                if search_result["found"]: # 单个数据
+                                if search_result is not False: # 单个数据
                                     self.selector(target_hwnd, 0)
-                                elif task_height is not None: # 多个数据
+                                elif task_top is not None and task_bottom is not None: # 多个数据
                                     assume_one_task = False
-                                    assume_task_num = int((task_height - 4) / 50) # 只要他不改UI高度这就是最准的
-                                    self.selector(target_hwnd, loop_num)
+                                    assume_task = self.get_task(target_hwnd, task_top, task_bottom, key, group)
+                                    if len(assume_task) > 0:
+                                        self.selector(target_hwnd, assume_task[loop_num])
+                                    else:
+                                        log("to_save: len(assume_task) == 0")
+                                        return False
                             else:
-                                self.selector(target_hwnd, loop_num)
+                                self.selector(target_hwnd, assume_task[loop_num])
+                            loop_num += 1
                     else:
+                        log("to_save: no right call window handle")
                         return False
                 if loop_num == 0:
+                    log("to_save: no data saved")
                     return False
                 else:
                     return True
             else:
+                log("to_save: no eye result")
                 return False
         except Exception as e:
-            print(e)
+            log("class UIController.to_save Error\n",traceback.format_exc())
             return False
+
+    def call_right_menu(self, handle, pos, sub_handles):
+        try:
+            self.click(handle,
+                       (pos[0] + self.eye_click_bias[0],
+                        pos[1] + self.eye_click_bias[1]), button="right", back=False)
+            start = time.time()
+            while time.time() - start < self.pop_timeout:
+                current_handle = win32gui.GetForegroundWindow()
+                if current_handle not in sub_handles:
+                    return current_handle
+            log("call_right_menu: time out")
+            return False
+        except Exception as e:
+            log("class UIController.call_right_menu Error\n",traceback.format_exc())
+            return False
+
+    def check_new_pop(self, handle):
+        before = get_all_top_hwnds()
+
+        self.keyboard(handle,
+                      VK_RETURN)
+        time.sleep(self.wait_menu_done)
+
+        after = get_all_top_hwnds()
+
+        new_handles = after - before
+        target_hwnd = None
+        search_result = None
+        task_top = None
+        task_bottom = None
+        for hwnd in new_handles:
+            rect = win32gui.GetWindowRect(hwnd)
+            width = rect[2] - rect[0]
+            height = rect[3] - rect[1]
+            title = win32gui.GetWindowText(hwnd)
+            if width > 100 and height > 50 and title == "":  # 很怪 但是这个判断方式确实不错
+                search_result = self.match(hwnd,  # 单个数据
+                                           self.search_bar_bias,
+                                           self.search_imp_path)
+                target_hwnd = hwnd
+                task_top = rect[1]
+                task_bottom = rect[3]
+                break
+        return target_hwnd, search_result, task_top, task_bottom
+
+    def get_task(self, target_hwnd, task_top, task_bottom, key, group):
+        if key is not None:
+            white_name = self.white_dict[key]
+            key_name = self.name_key_dict[key]
+        elif group is not None:
+            white_name = self.white_dict[group]
+            key_name = self.name_key_dict[group]
+        else:
+            return []
+
+        if white_name:
+            match_results = self.match(target_hwnd,  # 单个数据
+                                       self.full_bias,
+                                       white_name,
+                                       all_result=True)
+            if match_results is not False:
+                assume_task = self.target_chooser(match_results, task_top + 2, task_bottom - 2)
+            else:
+                assume_task = []
+        else:
+            assume_task = list(range(1, int((task_bottom - task_top - 2) / 50) + 1))
+
+        if key_name:
+            match_results = self.match(target_hwnd,  # 单个数据
+                                       self.full_bias,
+                                       key_name,
+                                       all_result=True)
+            if match_results is not False:
+                rename_task = self.target_chooser(match_results, task_top + 2, task_bottom - 2)
+                self.rename_list = sorted(set(rename_task) & set(assume_task))
+            else:
+                self.rename_list = []
+
+        return assume_task
+
+    @staticmethod
+    def target_chooser(match_results, top, bottom, step=50):
+        boundaries = list(range(top, bottom, step))
+        if boundaries[-1] < bottom:
+            boundaries.append(bottom)
+        values = []
+        for match_result in match_results:
+            values.append(match_result['center'][1])
+        results = []
+        for val in values:
+            idx = -1
+            for i in range(len(boundaries) - 1):
+                if boundaries[i] <= val < boundaries[i + 1]:
+                    idx = i + 1
+                    break
+            if idx != -1:
+                results.append(idx)
+        return sorted(results)
 
     def selector(self, hwnd, num):
         try:
@@ -235,56 +383,121 @@ class UIController:
                     active = False
                 self.keyboard(hwnd, VK_RIGHT, activate=False)
             elif num == 0:
-                self.keyboard(hwnd, VK_DOWN)
-            for i in range(2):
-                self.keyboard(hwnd, VK_DOWN, activate=False)
+                self.keyboard(hwnd, VK_UP)
+            self.keyboard(hwnd, VK_UP, activate=False)
+            time.sleep(self.wait_menu_done)
             self.keyboard(hwnd, VK_RETURN)
-            self.saver()
+            self.saver(num)
             return True
         except Exception as e:
-            print(e)
+            log("class UIController.selector Error\n",traceback.format_exc())
             return False
 
-    def saver(self):
+    def saver(self, num):
         try:
             save_handle = None
+            default_name = ""
             start = time.time()
-            while time.time() - start < self.wait_ui_done:
+            while time.time() - start < self.pop_timeout:
                 hwnd = win32gui.FindWindow("#32770", None)
                 if hwnd:
                     title = win32gui.GetWindowText(hwnd)
                     if "保存" in title:
-                        save_handle = hwnd
-                        break
+                        result = get_filename_edit_handle(hwnd)
+                        if result:
+                            default_name = result
+                            save_handle = hwnd
             if save_handle is not None:
-                pyperclip.copy("里面好.stl") # 命名规则 ########
+                new_name = self.rename(default_name, self.current_name, num)
+                pyperclip.copy(new_name)
                 self.keyboard(save_handle,
                               VK_CONTROL, ord("V"))
                 self.keyboard(save_handle,
                               VK_RETURN)
+
+                output_message = ": 已保存"
+                start = time.time()
+                while time.time() - start < self.pop_timeout:
+                    hwnd = win32gui.FindWindow("#32770", None)
+                    title = win32gui.GetWindowText(hwnd)
+                    if "确认另存为" in title:
+                        time.sleep(self.wait_click_done)
+                        self.keyboard(save_handle,
+                                      VK_LEFT, activate=False)
+                        self.keyboard(save_handle,
+                                      VK_RETURN, activate=False)
+                        output_message = ": 已覆盖"
+                        break
+                log(new_name, output_message)
+                start = time.time()
+                while time.time() - start < self.pop_timeout:
+                    hwnd = win32gui.FindWindow("#32770", None)
+                    if not hwnd or not "保存" in win32gui.GetWindowText(hwnd):
+                        time.sleep(self.wait_click_done)
+                        break
                 return True
             else:
+                log("saver: no save handle")
                 return False
         except Exception as e:
-            print(e)
+            log("class UIController.saver Error\n",traceback.format_exc())
             return False
 
+    def rename(self, default_name, patient_name, num):
+        new_name = default_name
+        if num in self.rename_list:
+            new_id = self.name_list[self.rename_list.index(num)]
+            new_name = patient_name + "-" + new_id + "-" + self.current_type
+        elif self.current_type == "ScanPost":
+            default_name_parts = default_name.split('-')
+            default_name_parts[-1] = self.current_type
+            new_name = '-'.join(default_name_parts)
+        elif self.current_type == "E":
+            match = re.search(r'\d+', default_name)
+            new_name = patient_name + "-" + str(match.group(0)) + "-" + "Anatomic"
+        return new_name
+
     @staticmethod
-    def match(handle, bias, imp_path):
+    def get_name_list(text):
+        tooth_numbers = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            match = re.match(r'^(\d+)', line)
+            if match:
+                tooth_numbers.append(match.group(1))
+        return tooth_numbers
+
+    @staticmethod
+    def match(handle, bias, imp_path, all_result = False):
         """
         限定范围内
         匹配图案
         """
         try:
             left, top, right, bottom = win32gui.GetWindowRect(handle)
+            right_base = left + bias[2]
+            if bias[2] == -1:
+                right_base = right
             rect = (left + bias[0],
                     top + bias[1],
-                    left + bias[2],
+                    right_base,
                     bottom + bias[3])
-            result = match_template_in_rect(rect, imp_path)
-            return result
+            origin_name = win32gui.GetWindowText(handle)
+            new_name = re.sub(r'[\\/:*?"<>|]' , "_", origin_name)
+            output_name = "screenshot/" + new_name + "-" + str(bias) + ".png"
+            results = match_template_in_rect(rect, imp_path, output_name = output_name)
+            if len(results) > 0:
+                if all_result:
+                    result = results
+                else:
+                    result = results[0]
+                return result
+            else:
+                return False
         except Exception as e:
-            print(e)
+            log("class UIController.match Error\n",traceback.format_exc())
             return False
 
     def activate_window(self, handle):
@@ -312,6 +525,7 @@ class UIController:
             self.activate_window(handle)
         for key in keys:
             win32api.keybd_event(key, 0, 0, 0)
+            # key_printer(key)
         for key in reversed(keys):
             win32api.keybd_event(key, 0, KEYEVENTF_KEYUP, 0)
 
@@ -346,6 +560,7 @@ class UIController:
     def handle_named(self, name, key_type="handle"):
         if name in self.hwnd_dict["name"]:
             return self.hwnd_dict[key_type][self.hwnd_dict["name"].index(name)]
+        log("handle_named: no handle named that")
         return False
 
     def clear(self):
@@ -381,12 +596,16 @@ class UIController:
         while time.time() - start < self.clear_timeout:
             if win32gui.GetWindowText(self.main_handle) == "exocad DentalCAD 3.3 Chemnitz 9512":
                 break
-        
+
+        self.current_type = None
+        self.current_name = None
         self.current_path = None
         self.hwnd_dict = {
             "handle": [],
             "name": [],
             "snapshot": []
         }
+        self.name_list = []
+        self.rename_list = []
 
 

@@ -53,15 +53,19 @@ class BatchExporter:
                     for file_name in os.listdir(sub_path):
                         if self.file_type in file_name:
                             file_path = sub_path + "\\" + file_name
-                            # name = "001_高春峰"
-                            # name = "1015陈英琢"
-                            name = "1135毛晓燕"
+                            # name = "1015陈英琢"# 合并 单个牙齿，测试识别模式
+                            name = "1135毛晓燕" # 合并 多个基台，测试识别模式。 多个扫描杆。 牙龈 取舍。解刨形态。
+                            # name = "1013郭佩琳" # 扫描模型 取舍。
+                            # name = "1107王奕麟" # 合并 单个基台，测试识别模式
+                            # name = "1218谭卉" # 合并 单个基台，测试识别模式
+                            # name = "1207马凤良" # 多又全
+                            # name = "1187王宪英1" # 合并，两颗牙
                             if name in file_name:
                             # self.UIController.process(file_path)
-                                self.UIController.process(file_path)
-                                # return
-                                self.UIController.clear()
+                                result = self.UIController.process(file_path, sub_name)
+                                print(result)
                                 return
+                                self.UIController.clear()
     def close(self):
         """
         关不关都无所谓，不差这个

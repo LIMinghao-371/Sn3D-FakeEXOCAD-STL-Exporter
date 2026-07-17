@@ -1,6 +1,6 @@
 import cv2
-path = "icon/search.png"
-output = "icon/search-1.png"
+path = "icon/__input.png"
+output = "icon/__output.png"
 threshold = 175
 
 img = cv2.imread(path, cv2.IMREAD_COLOR)
