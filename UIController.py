@@ -3,6 +3,7 @@ from PIL import ImageGrab, ImageDraw
 import csv
 from util import *
 import win32api
+import win32clipboard
 import pyperclip
 import time
 import traceback
@@ -57,6 +58,7 @@ class UIController:
         self.pop_timeout = 5.0 # 窗口更新,考虑到后续卡顿，统一设为5秒
         self.cam_refresh_timeout = 3.0
         self.menu_timeout = 2.0
+        self.copy_timeout = 1.0
         self.ui_timeout = 0.5 # 检测覆盖文件提示
 
         self.wait_menu_switch = 1.0
@@ -65,6 +67,7 @@ class UIController:
         self.wait_copy_txt = 0.25
         self.wait_click = 0.25  # 点击延迟
         self.wait_down = 0.1  # 按键延迟
+        self.wait_retry_clear_clipboard = 0.01
 
         self.render_max = 3 # 检测功能菜单弹窗最多次数，用以判断单数据或多数据
         self.load_render_max = 3 # 检测功能菜单弹窗最多次数，用以判断单数据或多数据
@@ -355,17 +358,19 @@ class UIController:
                                       VK_RETURN)
                         database_handle = self.wait_window(menu_handle,self.ui_timeout,self.database_dict[name_from_database],txt_mode=True)
                         if database_handle:
+                            self.clear_paste()
                             self.keyboard(database_handle,
                                           VK_CONTROL, ord("C"))
-                            time.sleep(self.wait_copy_txt)
+                            self.wait_paste()
                             self.current_name_list = self.get_name_list(pyperclip.paste())
                             self.keyboard(database_handle,
                                           VK_RETURN)
+                            self.wait_disappear(database_handle, self.ui_timeout)
                         else:
                             self.keyboard(menu_handle,
                                           VK_ESCAPE)
                             log("there is no ", name_from_database)
-                        time.sleep(self.wait_ui_done) # 防止事件堵塞队列，防止消息队列积压与UI线程饥饿
+                        self.wait_disappear(menu_handle, self.ui_timeout)
                 if len(self.current_hole_fill_tasks) > 0:
                     self.current_tasks = self.current_hole_fill_tasks
                     assume_one_task = False
@@ -445,7 +450,6 @@ class UIController:
                             if guide:
                                 self.click(self.main_handle,guide["center"],wait=self.wait_ui_done)
                                 if self.wait_component(self.main_handle, self.pop_timeout, self.window_dict["advanced"]):
-                                    time.sleep(self.wait_copy_txt)
                                     return True
                                 else:
                                     log_txt = log("等待向导超时")
@@ -543,7 +547,6 @@ class UIController:
                         self.log_txt_output(log_type, log_txt)
                         return False
                 if self.wait_window(root_handle,self.merge_timeout,self.window_dict["hole_fill_merge_done"]):
-                    time.sleep(self.wait_ui_done)
                     confirm_button = self.wait_component(merge_window,self.pop_timeout,self.window_dict["hole_fill_merge_confirm"])
                     if confirm_button:
                         self.click(merge_window, confirm_button["center"], wait=self.wait_click)
@@ -586,7 +589,7 @@ class UIController:
                 rect = win32gui.GetWindowRect(menu_handle)
                 if rect[3] - rect[1] > self.judge_menu_h:
                     pyperclip.copy(txt)  # 搜索功能菜单
-                    time.sleep(self.wait_copy_txt)
+                    self.wait_paste(txt)
                     self.keyboard(menu_handle,
                                   VK_CONTROL, ord("V"))
                     if self.wait_window(handle, self.menu_timeout, imp_path, false_mode = false_mode):
@@ -685,17 +688,16 @@ class UIController:
             rename_dict = self.white_dict["to_rename"][group]
             rect = win32gui.GetWindowRect(target_hwnd)
             new_menu = ImageGrab.grab(bbox=rect)
-            time.sleep(self.wait_down)
+            last_selection_imp = new_menu
             first_selection_imp = None
             start = time.time()
             select_num = 0
             task_list = []
             while time.time() - start < self.pop_timeout:
                 self.keyboard(target_hwnd, VK_DOWN)
-                time.sleep(self.wait_down)
-                current_menu = ImageGrab.grab(bbox=rect)
-                selected_delta_rect, selected_imp = find_changed_region(new_menu, current_menu)
-                if selected_imp is not None:
+                selected_delta_rect, selected_imp = self.wait_window_change(rect, last_selection_imp)
+                if selected_imp is not None and selected_delta_rect is not None:
+                    last_selection_imp = selected_imp
                     root_imp = cv2.cvtColor(np.array(selected_imp), cv2.COLOR_BGR2GRAY)
                     if first_selection_imp is None:
                         first_selection_imp = selected_imp
@@ -786,7 +788,7 @@ class UIController:
             if save_handle:
                 new_name = self.rename(default_name)
                 pyperclip.copy(new_name)
-                time.sleep(self.wait_copy_txt)
+                self.wait_paste(new_name)
                 self.keyboard(save_handle,
                               VK_CONTROL, ord("V"))
                 time.sleep(self.wait_copy_txt)
@@ -795,7 +797,9 @@ class UIController:
                 output_message = ": 已保存"
                 cover_handle = self.wait_win32_window(self.ui_timeout, "确认另存为",false_mode=False)
                 if cover_handle:
+                    dump_child_windows(cover_handle)
                     time.sleep(self.wait_click)
+                    return False
                     self.keyboard(save_handle,
                                   VK_LEFT, activate=False)
                     self.keyboard(save_handle,
@@ -805,7 +809,6 @@ class UIController:
                     log_type = "failed"
                     self.log_txt_output(log_type, log_txt)
                     return False
-                time.sleep(self.wait_save_disappear)
                 current_handle = win32gui.GetForegroundWindow()
                 if win32gui.GetWindowText(current_handle) == "":
                     self.keyboard(current_handle,
@@ -1015,6 +1018,60 @@ class UIController:
             log_type = "failed"
             self.log_txt_output(log_type, log_txt)
             return False
+
+    def wait_window_change(self, rect, last_imp):
+        try:
+            start = time.time()
+            while time.time() - start < self.ui_timeout:
+                current_imp = ImageGrab.grab(bbox=rect)
+                selected_delta_rect, selected_imp = find_changed_region(last_imp, current_imp)
+                if selected_delta_rect is not None and selected_imp is not None:
+                    return selected_delta_rect, selected_imp
+            log_txt = log("下箭头事件超时")
+            log_type = "failed"
+            self.log_txt_output(log_type, log_txt)
+            return False, False
+        except Exception as e:
+            log_txt = log("error: ", traceback.format_exc())
+            log_type = "failed"
+            self.log_txt_output(log_type, log_txt)
+            return False, False
+
+    def wait_paste(self, text = None):
+        try:
+            start = time.time()
+            while time.time() - start < self.copy_timeout:
+                content = pyperclip.paste()
+                if content:
+                    if text is not None and content == text:
+                        return True
+                    elif text is None:
+                        return True
+            log_txt = log("剪切板更新超时")
+            log_type = "failed"
+            self.log_txt_output(log_type, log_txt)
+            return False
+        except Exception as e:
+            log_txt = log("error: ", traceback.format_exc())
+            log_type = "failed"
+            self.log_txt_output(log_type, log_txt)
+            return False
+
+    def clear_paste(self, retry = 3):
+        for i in range(retry):
+            try:
+                win32clipboard.OpenClipboard(0)  # 0 表示当前线程拥有所有权
+                win32clipboard.EmptyClipboard()  # 直接清空，不分配任何数据
+                win32clipboard.CloseClipboard()
+                return True
+            except Exception as e:
+                time.sleep(self.wait_retry_clear_clipboard)
+            finally:
+                try:
+                    win32clipboard.CloseClipboard()
+                except Exception as e:
+                    pass
+        return False
 
     def activate_window(self, handle):
         """

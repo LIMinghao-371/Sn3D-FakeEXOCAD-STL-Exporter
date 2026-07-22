@@ -361,3 +361,25 @@ class CSVLogger:
         if not self.rows:
             return None
         return self.rows[-1].copy()
+
+
+def dump_child_windows(hwnd, indent=0):
+    """
+    递归打印指定窗口的所有子窗口（包括自绘控件）。
+    输出：句柄、类名、窗口文本、控件ID（如果存在）
+    """
+
+    def enum_proc(child_hwnd, extra):
+        # 1. 获取基本信息
+        class_name = win32gui.GetClassName(child_hwnd)
+        window_text = win32gui.GetWindowText(child_hwnd)
+        # 2. 尝试获取控件 ID（标准 Windows 控件通常有 ID）
+        control_id = win32gui.GetDlgCtrlID(child_hwnd)
+        # 3. 打印缩进信息
+        print(f"{'    ' * indent}HWND: {child_hwnd} | Class: {class_name} | Text: '{window_text}' | ID: {control_id}")
+        # 4. 递归进入子控件（如果有更深层的自绘控件，继续打印）
+        win32gui.EnumChildWindows(child_hwnd, enum_proc, None)
+
+    print(f"=== 开始遍历窗口 {hwnd} 的子控件 ===")
+    win32gui.EnumChildWindows(hwnd, enum_proc, None)
+    print("=== 遍历结束 ===")
