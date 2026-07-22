@@ -243,7 +243,7 @@ def get_filename_edit_handle(dlg):
     else:
         return False
 
-def key_printer(vk_code):
+def key2str(vk_code):
     """将虚拟键码转换为人类可读的字符串名称（用于可视化/日志）。"""
     mapping = {
         VK_DOWN: "DOWN",
@@ -267,13 +267,97 @@ def key_printer(vk_code):
         VK_F1: "F1",
     }
     if vk_code in mapping.keys():
-        print(mapping[vk_code])
+        return mapping[vk_code]
     else:
-        print(chr(vk_code))
+        return chr(vk_code)
 
 def log(*args):
     output = ""
     for arg in args:
         output += " " + str(arg)
+    print(output)
     output += "\n"
     return output
+
+
+import csv
+import os
+
+class CSVLogger:
+    """
+    极简 CSV 日志记录器，支持：
+    - 固定列名
+    - 动态增加行（add_row）
+    - 修改最后一行（update_last）
+    - 实时保存（每次操作立即写入文件）
+    - 自动创建目录、自动管理表头
+    """
+    def __init__(self, file_path, columns):
+        """
+        :param file_path: CSV 文件路径（目录不存在时会自动创建）
+        :param columns: 列名列表，第一个列名将作为“行标识”（如文件名）
+        """
+        self.file_path = file_path
+        self.columns = columns
+        self.rows = []  # 内存中缓存所有行（字典列表）
+        self._ensure_dir()
+        self._load_existing()
+
+    def _ensure_dir(self):
+        """确保文件所在的目录存在"""
+        dir_name = os.path.dirname(self.file_path)
+        if dir_name and not os.path.exists(dir_name):
+            os.makedirs(dir_name, exist_ok=True)
+
+    def _load_existing(self):
+        """如果文件存在且非空，加载已有数据；否则准备空表"""
+        if not os.path.isfile(self.file_path):
+            return
+        if os.path.getsize(self.file_path) == 0:
+            return
+
+        with open(self.file_path, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            # 检查表头是否与预期一致
+            if reader.fieldnames is None:
+                return  # 空文件，无表头
+            if reader.fieldnames != self.columns:
+                raise ValueError(
+                    f"现有 CSV 表头 {reader.fieldnames} 与预期 {self.columns} 不一致，无法继续"
+                )
+            self.rows = list(reader)
+
+    def _save(self):
+        """将内存中的所有行覆盖写入 CSV 文件"""
+        with open(self.file_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=self.columns)
+            writer.writeheader()
+            writer.writerows(self.rows)
+
+    def add_row(self, identifier):
+        """
+        添加新行，第一列填入标识符（如文件名），其余列留空
+        """
+        row = {col: '' for col in self.columns}
+        row[self.columns[0]] = identifier
+        self.rows.append(row)
+        self._save()
+
+    def update_last(self, column, value):
+        """
+        修改最后一行的指定列的值，并立即保存
+        """
+        if not self.rows:
+            raise ValueError("还没有任何行，请先调用 add_row() 添加一行")
+        if column not in self.columns:
+            raise ValueError(f"列 '{column}' 不存在，可用列: {self.columns}")
+        self.rows[-1][column] = value
+        self._save()
+
+    def get_last_row(self):
+        """
+        返回最后一行的副本（只读），方便查看当前状态
+        """
+        if not self.rows:
+            return None
+        return self.rows[-1].copy()
