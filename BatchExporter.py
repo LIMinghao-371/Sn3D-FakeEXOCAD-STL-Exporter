@@ -46,6 +46,22 @@ class BatchExporter:
         以后有需求的话
         我给它做个配套的UI
         """
+        # name = "001_高春峰"# 非法数据
+        # name = "1012罗志惠"  # 超级非法数据
+        # name = "1003崔智森" # 报错了
+        name = "1043曹忠厚1" # 报错了
+        # name = "1015陈英琢"# 合并 单个牙齿，测试识别模式
+        # name = "1135毛晓燕" # 合并 多个基台，测试识别模式。 多个扫描杆。 牙龈 取舍。解刨形态。
+        # name = "1013郭佩琳" # 扫描模型 取舍。 ?<----
+        # name = "1107王奕麟" # 合并 单个基台，测试识别模式
+        # name = "1218谭卉" # 合并 单个基台，测试识别模式
+        # name = "1207马凤良" # 多又全， 一个合并多个数据，有扫描杆
+        # name = "1187王宪英1" # 合并，两颗牙 无扫描杆 一个解刨内冠，一个单颗合并
+        # name = "1040赵景波" # 合并，基台 和 修复体 <-- 合并部分菜单不对
+        # name = "1042夏德斌" # 合并，基台 和 修复体
+        # name = "1045韩金" # 合并，只有单个基台，有扫描杆
+        # name = "1051李民" # 合并，上下基台
+        # name = "1047闫" # 两个 合并蜡型, 一个解刨内冠，一个合并
         if self.init_success and self.UIController:
             for sub_name in os.listdir(root_path):
                 sub_path = root_path + "\\" + sub_name
@@ -53,19 +69,13 @@ class BatchExporter:
                     for file_name in os.listdir(sub_path):
                         if self.file_type in file_name:
                             file_path = sub_path + "\\" + file_name
-                            # name = "1015陈英琢"# 合并 单个牙齿，测试识别模式
-                            name = "1135毛晓燕" # 合并 多个基台，测试识别模式。 多个扫描杆。 牙龈 取舍。解刨形态。
-                            # name = "1013郭佩琳" # 扫描模型 取舍。
-                            # name = "1107王奕麟" # 合并 单个基台，测试识别模式
-                            # name = "1218谭卉" # 合并 单个基台，测试识别模式
-                            # name = "1207马凤良" # 多又全
-                            # name = "1187王宪英1" # 合并，两颗牙
-                            if name in file_name:
-                            # self.UIController.process(file_path)
-                                result = self.UIController.process(file_path, sub_name)
-                                print(result)
-                                return
-                                self.UIController.clear()
+                            if name is not None and name not in file_path:
+                                continue
+                            else:
+                                name = None
+                            result = self.UIController.process(file_path, sub_name)
+                            self.UIController.clear()
+
     def close(self):
         """
         关不关都无所谓，不差这个

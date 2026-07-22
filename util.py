@@ -3,14 +3,15 @@ from win32con import *
 import ctypes
 import cv2
 import numpy as np
+import inspect
 from PIL import ImageGrab
 import time
 
-def match_template_in_rect(rect, template_path, threshold=0.9, max_results=10, nms_radius=20, output_name="icon/__screenshot.png"):
+def match_template_in_rect(gray, template_path, rect, mode = cv2.IMREAD_GRAYSCALE, threshold=0.9, max_results=10, nms_radius=20):
     """
     在屏幕指定区域内搜索模板图片，返回所有匹配到的位置（非极大值抑制后）
 
-    :param output_name:
+    :param mode:
     :param rect: (left, top, right, bottom) 屏幕绝对坐标
     :param template_path: 模板图片路径
     :param threshold: 匹配度阈值 (0~1)
@@ -25,19 +26,8 @@ def match_template_in_rect(rect, template_path, threshold=0.9, max_results=10, n
         'height': int
         如果没有匹配，返回空列表。
     """
-    left, top, right, bottom = rect
-
-    # 1. 截图并转灰度
-    screenshot = ImageGrab.grab(bbox=(left, top, right, bottom))
-    img_np = np.array(screenshot)
-    gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
-    cv2.imwrite(output_name, gray)
-
-    # 调试：保存截图（可选）
-    # cv2.imwrite("icon/screenshot.png", gray)
-
     # 2. 加载模板
-    template = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+    template = cv2.imread(template_path, mode)
     if template is None:
         return []  # 返回空列表表示加载失败
 
@@ -73,6 +63,7 @@ def match_template_in_rect(rect, template_path, threshold=0.9, max_results=10, n
             if len(kept) >= max_results:
                 break
 
+    left, top, right, bottom = rect
     # 6. 构造返回结果
     results = []
     for x, y in kept:
@@ -89,6 +80,47 @@ def match_template_in_rect(rect, template_path, threshold=0.9, max_results=10, n
         })
 
     return results
+
+def find_changed_region(img1, img2, threshold=10, min_area=50):
+    """
+    比较两张PIL图像，找出变化的矩形区域。
+    返回:
+        rect: (x, y, w, h) 相对于img1左上角的矩形
+        region_img: 从img1中裁剪的变化区域图像 (PIL Image)
+        diff_img: 差分后的二值图像 (numpy array, 灰度)
+    """
+    # 转为灰度numpy数组
+    gray1 = cv2.cvtColor(np.array(img1), cv2.COLOR_RGB2GRAY)
+    gray2 = cv2.cvtColor(np.array(img2), cv2.COLOR_RGB2GRAY)
+
+    # 差分
+    diff = cv2.absdiff(gray1, gray2)
+
+    # 二值化
+    _, thresh = cv2.threshold(diff, threshold, 255, cv2.THRESH_BINARY)
+
+    # 形态学闭运算，连接断裂区域（可选）
+    kernel = np.ones((3, 3), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+
+    # 查找轮廓
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if not contours:
+        return None, None
+
+    # 假设最大面积的轮廓就是目标变化区域
+    largest = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(largest)
+    if area < min_area:
+        return None, None
+
+    x, y, w, h = cv2.boundingRect(largest)
+
+    # 从img1中裁剪变化区域 (PIL图像)
+    region_img = img1.crop((x, y, x + w, y + h))
+
+    return (x, y, w, h), region_img
 
 def print_window_tree(hwnd, indent=0, prefix="", is_last=True, max_depth=6, is_first=True, max_txt = 30):
     """
@@ -195,6 +227,7 @@ def get_filename_edit_handle(dlg):
     result_text = [None]
     def enum_callback(hwnd, _):
         if win32gui.GetClassName(hwnd) == "Edit":
+            print(win32gui.GetWindowText(hwnd))
             length = win32gui.SendMessage(hwnd, WM_GETTEXTLENGTH, 0, 0)
             if length > 0:
                 buffer = ctypes.create_unicode_buffer(length + 1)
@@ -238,5 +271,9 @@ def key_printer(vk_code):
     else:
         print(chr(vk_code))
 
-def log(*args, **kwargs):
-    print(*args, **kwargs)
+def log(*args):
+    output = ""
+    for arg in args:
+        output += " " + str(arg)
+    output += "\n"
+    return output

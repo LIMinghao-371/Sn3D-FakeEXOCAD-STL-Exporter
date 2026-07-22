@@ -1,88 +1,91 @@
 import win32gui
 import win32con
+import win32api
+from PIL import ImageGrab
 import time
-from pywinauto import Desktop
+import os
+
+from win32con import VK_RETURN, VK_SPACE
 
 
-#
-# def get_edit_text_by_message(edit_hwnd):
-#     length = win32gui.SendMessage(edit_hwnd, win32con.WM_GETTEXTLENGTH, 0, 0)
-#     if length == 0:
-#         return ""
-#     buffer = win32gui.PyMakeBuffer((length + 1) * 2)
-#     win32gui.SendMessage(edit_hwnd, win32con.WM_GETTEXT, length + 1, buffer)
-#     return buffer.tobytes().decode('utf-16-le').rstrip('\x00')
-#
-# def find_edit_recursive(parent_hwnd, depth=0):
-#     result = []
-#     def enum_cb(child, _):
-#         class_name = win32gui.GetClassName(child)
-#         if class_name == "Edit":
-#             # 尝试用两种方法读取
-#             text1 = win32gui.GetWindowText(child)
-#             text2 = get_edit_text_by_message(child)
-#             print(f"  找到 Edit: HWND={child}")
-#             print(f"    GetWindowText: '{text1}'")
-#             print(f"    WM_GETTEXT: '{text2}'")
-#             result.append((child, text2 if text2 else text1))
-#         # 继续递归
-#         find_edit_recursive(child, depth+1)
-#         return True
-#     win32gui.EnumChildWindows(parent_hwnd, enum_cb, None)
-#     return result[0] if result else None
-#
-# def capture_save_dialog_debug(timeout=15):
-#     print("⏳ 等待保存对话框...")
-#     start = time.time()
-#     while time.time() - start < timeout:
-#         dlg = win32gui.FindWindow("#32770", None)
-#         if dlg:
-#             title = win32gui.GetWindowText(dlg)
-#             if "保存" in title or "另存" in title or "Save" in title:
-#                 print(f"✅ 找到对话框: {title} (HWND: {dlg})")
-#                 # 递归查找所有 Edit
-#                 edit_info = find_edit_recursive(dlg)
-#                 if edit_info:
-#                     edit_hwnd, text = edit_info
-#                     if text:
-#                         print(f"✅ 成功读取文件名: '{text}'")
-#                         return dlg, edit_hwnd, text
-#                     else:
-#                         print("⚠️ Edit 找到了，但内容为空（尝试 UIA 方案）")
-#                         # 立即尝试 UIA
-#                         uia_text = get_filename_edit_handle(dlg)  # 只试1秒
-#                         if uia_text:
-#                             print(f"✅ UIA 读到: '{uia_text}'")
-#                             return dlg, None, uia_text
-#                 else:
-#                     print("⏳ 未找到 Edit，继续等待...")
-#         time.sleep(0.2)
-#     print("❌ 超时")
-#     return None, None, None
+def wait_for_window_and_save(keyword, save_path=None, timeout=60):
+    def is_key_pressed(vk_code):
+        # 检查最高有效位（高位为1表示键当前被按下）
+        return win32api.GetAsyncKeyState(vk_code) & 0x8000
+    """
+    循环检测最前方窗口，若标题匹配关键字，则等待用户按空格键保存该窗口截图并退出。
 
-# def get_filename_edit_handle(dlg):
-#     result = [None]
-#     def callback(hwnd, _):
-#         class_name = win32gui.GetClassName(hwnd)
-#         if class_name == "Edit":
-#             length = win32gui.SendMessage(hwnd, WM_GETTEXTLENGTH, 0, 0)
-#             if length > 0:
-#                 buffer = win32gui.PyMakeBuffer((length + 1) * 2)
-#                 win32gui.SendMessage(hwnd, WM_GETTEXT, length + 1, buffer)
-#                 text = buffer.tobytes().decode('utf-16-le').rstrip('\x00')
-#                 if text:
-#                     result[0] = text
-#                     return False  # 停止枚举
-#         return True
-#
-#     win32gui.EnumChildWindows(dlg, callback, None)
-#     if result[0]:
-#         print(f"✅ 获取到文件名: '{result[0]}'")
-#         return result[0]
+    :param keyword: 窗口标题需要包含的关键字（字符串）
+    :param save_path: 截图保存路径（若为 None，则自动生成带时间戳的文件名）
+    :param timeout: 最大等待时间（秒），超时返回 False
+    :return: True(截图已保存) / False(超时或出错)
+    """
+    if save_path is None:
+        # 自动生成文件名：window_YYYYMMDD_HHMMSS.png
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        save_path = f"window_{timestamp}.png"
 
-if __name__ == "__main__":
-    dlg, edit_hwnd, filename = capture_save_dialog_debug()
-    if filename:
-        print(f"\n最终结果: 文件名 = '{filename}'")
-    else:
-        print("\n❌ 未能读取文件名，请确认对话框是否打开并已填入默认文件名。")
+    print(f"🔍 开始监控前台窗口，目标关键字: '{keyword}'")
+    print("⏳ 找到目标窗口后，请按下 空格键 (Space) 截图保存")
+    print(f"⏱️ 超时时间: {timeout} 秒")
+
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        try:
+            # 获取当前最前方的窗口句柄
+            hwnd = win32gui.GetForegroundWindow()
+            if not hwnd:
+                time.sleep(0.05)
+                continue
+
+            # 获取窗口标题
+            title = win32gui.GetWindowText(hwnd)
+
+            # 检查是否匹配关键字
+            if keyword.lower() in title.lower():
+                # 窗口匹配，提示用户
+                print(f"\r✅ 已匹配窗口: '{title}'   (按空格截图)", end='')
+
+                # 检查空格键是否被按下
+                if is_key_pressed(win32con.VK_DOWN):
+                    print("\n✋ 检测到空格按键，正在截图...")
+
+                    # 获取窗口矩形
+                    rect = win32gui.GetWindowRect(hwnd)
+                    left, top, right, bottom = rect
+                    width = right - left
+                    height = bottom - top
+
+                    # 防止窗口尺寸异常（极小或负数）
+                    if width <= 0 or height <= 0:
+                        print("❌ 窗口尺寸异常，无法截图")
+                        return False
+
+                    # 截取屏幕对应区域
+                    img = ImageGrab.grab(bbox=(left, top, right, bottom))
+
+                    # 保存
+                    os.makedirs(os.path.dirname(os.path.abspath(save_path)) or '.', exist_ok=True)
+                    img.save(save_path)
+                    print(f"✅ 截图已保存至: {save_path}")
+                    return True
+            else:
+                # 没匹配到，显示当前窗口信息（可选）
+                # 避免刷屏，每0.5秒打印一次状态
+                if int(time.time()) % 1 == 0:
+                    print(f"\r🎯 当前窗口: '{title[:30]}...'  等待匹配 '{keyword}'", end='')
+        except Exception as e:
+            print(f"\n⚠️ 出现错误: {e}")
+
+        time.sleep(0.05)  # 防止CPU满载
+
+    print("\n⏰ 超时，未能在限定时间内完成操作")
+    return False
+# 例如：检测标题中包含 "保存网格" 的窗口
+keyword = "DentalConfig.ExoSearch"
+keyword = "exocad DentalCAD 3.3"
+if wait_for_window_and_save(keyword, "screenshot/current.png", timeout=30):
+    print("截图成功！")
+else:
+    print("截图失败或超时。")
