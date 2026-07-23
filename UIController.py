@@ -23,20 +23,20 @@ class UIController:
         self.current_failed = None
         self.current_invalid = None
         self.current_log_data = None
-        self.current_log_path = None
         self.current_txt_path = None
         self.show_hide_handle = None
         self.guide_bar_handle = None
-        self.logger = None
+        self.logger = {"error":None,
+                       "success":None}
         self.current_index = 0
         self.current_rename = 0
         self.current_tasks = [{}]
         self.current_hole_fill_tasks = []
         self.current_name_list = []
         self.log_dict = {
-            "success": [0,""],
-            "failed": [0,""],
-            "invalid": [0,""],
+            "success": [0, 0],
+            "failed": [0, ""],
+            "invalid": [0, ""],
         }
         # 只读，无须清除
         self.black_dict = {}
@@ -48,34 +48,24 @@ class UIController:
         self.judge_pale_std = 1.0
         self.judge_pale_w = 25
         self.judge_pale_h = 50
-        self.judge_menu_t = 4
         self.judge_menu_h = 500
 
         self.load_timeout = 60.0  # 数据加载
         self.clear_timeout = 30.0  # 项目删除
         self.merge_timeout = 30.0
-        self.delete_timeout = 5.0
         self.pop_timeout = 5.0 # 窗口更新,考虑到后续卡顿，统一设为5秒
         self.cam_refresh_timeout = 3.0
         self.menu_timeout = 2.0
         self.copy_timeout = 1.0
         self.ui_timeout = 0.5 # 检测覆盖文件提示
 
-        self.wait_menu_switch = 1.0
         self.wait_ui_done = 0.5  # UI更新
-        self.wait_save_disappear = 0.25
-        self.wait_copy_txt = 0.25
         self.wait_click = 0.25  # 点击延迟
-        self.wait_down = 0.1  # 按键延迟
-        self.wait_retry_clear_clipboard = 0.01
+        self.minimal_ask = 0.001
 
         self.render_max = 3 # 检测功能菜单弹窗最多次数，用以判断单数据或多数据
-        self.load_render_max = 3 # 检测功能菜单弹窗最多次数，用以判断单数据或多数据
 
-        self.close_bias = (0, -10)
-        self.hide_all_bias = (-120, -20)
         self.eye_click_bias = (40, 0)
-        self.eye_bar_bias = (25, 20, 550, -20)
         self.search_bar_bias = (0, 0, 60, 0)
         self.full_bias = (0, 0, -1, 0)
 
@@ -147,7 +137,6 @@ class UIController:
                    "对颌牙", "扫描模型", "扫描杆", "牙龈扫描", "解刨形态",
                    "合并数据", "孔洞修复", "修复保存", "关闭"]
 
-
     def process(self, current_path, current_name):
         """
         跑一遍流程
@@ -158,10 +147,10 @@ class UIController:
         self.dir_init(current_path, current_name)
         self.todo(self.headers[2],self.delete_if_need)
         if not self.todo(self.headers[3],self.load):
-            self.time_output(self.headers[1],start)
+            self.end_log(self.headers[1],start)
             return False
         if not self.todo(self.headers[4],self.judge,"Merged"):
-            self.time_output(self.headers[1], start)
+            self.end_log(self.headers[1], start)
             return False
         self.todo(self.headers[5],self.to_save,"Antagonist")
         self.todo(self.headers[6],self.to_save,"Scans")
@@ -171,16 +160,16 @@ class UIController:
         if self.todo(self.headers[10],self.to_save,"Merged"):
             if self.todo(self.headers[11],self.to_fill_hole):
                 self.todo(self.headers[12], self.to_save, "Merged", wait=self.wait_click)
-        self.time_output(self.headers[1], start)
+        self.end_log(self.headers[1], start)
         return True
 
     def delete_if_need(self):
         hwnd = win32gui.FindWindow("#32770", None)
         if hwnd:
             log_txt = log("检测到未关闭保存窗口")
-            log_type = "invalid"
+            log_type = "failed"
             self.log_txt_output(log_type, log_txt)
-
+            self.log_txt_output(log_type, hwnd)
             title = win32gui.GetWindowText(hwnd)
             if "保存" in title:
                 win32gui.PostMessage(hwnd, WM_CLOSE, 0, 0)
@@ -188,9 +177,9 @@ class UIController:
         close_icon = self.match(handle,self.full_bias,self.window_dict["close"])
         if close_icon:
             log_txt = log("检测到关闭弹窗")
-            log_type = "invalid"
+            log_type = "failed"
             self.log_txt_output(log_type, log_txt)
-
+            self.log_txt_output(log_type, handle)
             self.keyboard(handle, VK_RETURN)
             if self.wait_component(self.main_handle, self.clear_timeout, self.window_dict["closed"]):
                 # 当真的出现这个情况时，不管怎么样，都会连累后续数据。区别只是连累一个还是全部
@@ -216,18 +205,18 @@ class UIController:
             pos = (int((rect[0] + rect[2])/2), int((rect[0] + rect[2])/2))
             self.click(self.main_handle, pos)
             pyperclip.copy(self.current_path) # 复制到剪切板
+            self.wait_paste(self.current_path)
             self.keyboard(self.main_handle,
                           VK_CONTROL, ord("V")) # Ctrl+ V 粘贴
             pop_hwnd = self.wait_window(self.main_handle,self.pop_timeout,self.window_dict["load"])
             self.keyboard(pop_hwnd,
                           VK_RETURN) # Enter 确认
-            time.sleep(self.wait_copy_txt) # 由于 EXO CAD 异步事件特性，需要在这里等待事件处理完毕，否则引起意想不到的bug
+            time.sleep(self.wait_click) # 由于 EXO CAD 异步事件特性，需要在这里等待事件处理完毕，否则引起意想不到的bug
             self.show_hide_handle = self.wait_window(self.main_handle, self.load_timeout, self.window_dict["show_hide"])
             if self.show_hide_handle:
                 if self.wait_component(self.main_handle,self.pop_timeout,self.window_dict["loaded"]):
                     self.guide_bar_handle = self.wait_window(self.main_handle, self.cam_refresh_timeout,self.window_dict["guide_bar_done"],false_mode=False)
                     if self.guide_bar_handle:
-                        time.sleep(self.wait_ui_done)
                         log_txt = log("加载成功")
                         log_type = "success"
                         self.log_txt_output(log_type, log_txt)
@@ -248,37 +237,6 @@ class UIController:
                 log_type = "failed"
                 self.log_txt_output(log_type, log_txt)
                 return False
-        except Exception as e:
-            log_txt = log("error: ", traceback.format_exc())
-            log_type = "failed"
-            self.log_txt_output(log_type, log_txt)
-            return False
-
-    def hide_all(self):
-        """
-        点击左上角收起 显示/隐藏 面板 (测试一下)
-        Ctrl + 点击 隐藏全部
-        点击右上角展开 显示/隐藏 面板 (测试一下)
-        """
-        try:
-            show_hide_handle = self.show_hide_handle
-            root_handle = win32gui.GetForegroundWindow()
-            left, top, right, bottom = win32gui.GetWindowRect(show_hide_handle)
-            self.click(root_handle,
-                       (right + self.hide_all_bias[0],
-                        bottom + self.hide_all_bias[1]),
-                       True,
-                       wait=self.wait_ui_done)
-            start = time.time()
-            while time.time() - start < self.pop_timeout:
-                if not self.match(show_hide_handle,
-                                  self.eye_bar_bias,
-                                  self.window_dict["eye"]):
-                    break
-            log_txt = log("全体隐藏显示 成功")
-            log_type = "success"
-            self.log_txt_output(log_type, log_txt)
-            return True
         except Exception as e:
             log_txt = log("error: ", traceback.format_exc())
             log_type = "failed"
@@ -695,44 +653,51 @@ class UIController:
             task_list = []
             while time.time() - start < self.pop_timeout:
                 self.keyboard(target_hwnd, VK_DOWN)
-                selected_delta_rect, selected_imp = self.wait_window_change(rect, last_selection_imp)
-                if selected_imp is not None and selected_delta_rect is not None:
-                    last_selection_imp = selected_imp
-                    root_imp = cv2.cvtColor(np.array(selected_imp), cv2.COLOR_BGR2GRAY)
-                    if first_selection_imp is None:
-                        first_selection_imp = selected_imp
-                    elif np.array_equal(np.array(first_selection_imp),np.array(selected_imp)):
-                        return task_list
-                    abs_rect = (rect[0] - selected_delta_rect[0],
-                                rect[1] - selected_delta_rect[1],
-                                rect[2] - selected_delta_rect[2],
-                                rect[3] - selected_delta_rect[3])
-                    task_dict = None
-                    none_imp = root_imp[0:self.judge_pale_h, 0:self.judge_pale_w]
-                    # cv2.imwrite("screenshot/none" + str(select_num) + ".png", none_imp)
-                    if np.mean(none_imp) > self.judge_pale_mean and np.std(none_imp) < self.judge_pale_std:
-                        if not white_keyname:
-                            task_pos = (20, selected_delta_rect[1] + 20)
-                            task_dict = {"pos": task_pos}
-                        elif self.match(None, None, white_keyname ,root_imp = root_imp, rect = abs_rect):
-                            task_pos = (20, selected_delta_rect[1] + 20)
-                            task_dict = {"pos": task_pos}
-                        if task_dict is not None:
-                            if rename_dict and len(self.current_name_list) > 0:
-                                if "path" in rename_dict and self.match(None, None, rename_dict["path"] ,root_imp = root_imp, rect = abs_rect):
-                                    task_dict["id"] = self.current_name_list[self.current_rename]
-                                    self.current_rename += 1
-                                elif "path" not in rename_dict:
-                                    task_dict["id"] = self.current_name_list[self.current_rename]
-                                    self.current_rename += 1
-                            task_list.append(task_dict)
-                        # if task_dict is not None:
-                            # cv2.imwrite("screenshot/selected" + str(select_num) + ".png", root_imp)
-                        # else:
-                            # cv2.imwrite("screenshot/rejected" + str(select_num) + ".png", root_imp)
-                        select_num += 1
+                last_selection_imp = self.wait_window_change(rect, last_selection_imp)
+                if last_selection_imp:
+                    selected_delta_rect, selected_imp = find_changed_region(new_menu, last_selection_imp)
+                    if selected_imp and selected_delta_rect:
+                        root_imp = cv2.cvtColor(np.array(selected_imp), cv2.COLOR_BGR2GRAY)
+                        if first_selection_imp is None:
+                            first_selection_imp = selected_imp
+                        elif np.array_equal(np.array(first_selection_imp),np.array(selected_imp)):
+                            return task_list
+                        abs_rect = (rect[0] - selected_delta_rect[0],
+                                    rect[1] - selected_delta_rect[1],
+                                    rect[2] - selected_delta_rect[2],
+                                    rect[3] - selected_delta_rect[3])
+                        task_dict = None
+                        none_imp = root_imp[0:self.judge_pale_h, 0:self.judge_pale_w]
+                        # cv2.imwrite("screenshot/none" + str(select_num) + ".png", none_imp)
+                        if np.mean(none_imp) > self.judge_pale_mean and np.std(none_imp) < self.judge_pale_std:
+                            if not white_keyname:
+                                task_pos = (20, selected_delta_rect[1] + 20)
+                                task_dict = {"pos": task_pos}
+                            elif self.match(None, None, white_keyname ,root_imp = root_imp, rect = abs_rect):
+                                task_pos = (20, selected_delta_rect[1] + 20)
+                                task_dict = {"pos": task_pos}
+                            if task_dict is not None:
+                                if rename_dict and len(self.current_name_list) > 0:
+                                    if "path" in rename_dict and self.match(None, None, rename_dict["path"] ,root_imp = root_imp, rect = abs_rect):
+                                        task_dict["id"] = self.current_name_list[self.current_rename]
+                                        self.current_rename += 1
+                                    elif "path" not in rename_dict:
+                                        task_dict["id"] = self.current_name_list[self.current_rename]
+                                        self.current_rename += 1
+                                task_list.append(task_dict)
+                            # if task_dict is not None:
+                                # cv2.imwrite("screenshot/selected" + str(select_num) + ".png", root_imp)
+                            # else:
+                                # cv2.imwrite("screenshot/rejected" + str(select_num) + ".png", root_imp)
+                            select_num += 1
+                    else:
+                        log_txt = log("未检测到下箭头的选中事件")
+                        log_type = "failed"
+                        self.log_txt_output(log_type, log_txt)
+                        self.log_imp_output(log_type, target_hwnd)
+                        return False
                 else:
-                    log_txt = log("未检测到下箭头的选中事件")
+                    log_txt = log("未检测到下箭头的UI变化")
                     log_type = "failed"
                     self.log_txt_output(log_type, log_txt)
                     self.log_imp_output(log_type, target_hwnd)
@@ -784,26 +749,40 @@ class UIController:
 
     def saver(self):
         try:
-            save_handle, default_name = self.wait_win32_window(self.pop_timeout, "保存", get_txt=True)
+            save_handle = self.wait_win32_window(self.pop_timeout, "保存")
             if save_handle:
+                edit_handle, default_name = self.wait_win32_component(save_handle,"Edit",get_text=True)
+                if default_name is None:
+                    default_name = ""
+                    log_txt = log("获取文件名失败")
+                    log_type = "failed"
+                    self.log_txt_output(log_type, log_txt)
                 new_name = self.rename(default_name)
                 pyperclip.copy(new_name)
                 self.wait_paste(new_name)
                 self.keyboard(save_handle,
                               VK_CONTROL, ord("V"))
-                time.sleep(self.wait_copy_txt)
+                self.check_edit(edit_handle, new_name)
                 self.keyboard(save_handle,
                               VK_RETURN)
                 output_message = ": 已保存"
                 cover_handle = self.wait_win32_window(self.ui_timeout, "确认另存为",false_mode=False)
                 if cover_handle:
-                    dump_child_windows(cover_handle)
-                    time.sleep(self.wait_click)
-                    return False
-                    self.keyboard(save_handle,
-                                  VK_LEFT, activate=False)
-                    self.keyboard(save_handle,
-                                  VK_RETURN, activate=False)
+                    output_message = ": 已覆盖"
+                    handle, _ = self.wait_win32_component(cover_handle,"Button")
+                    if handle is not None:
+                        self.keyboard(cover_handle,
+                                      VK_MENU, ord("Y"), activate=False)
+                        if not self.wait_disappear(cover_handle,self.pop_timeout):
+                            log_txt = log("另存为窗口退出失败")
+                            log_type = "failed"
+                            self.log_txt_output(log_type, log_txt)
+                            return False
+                    else:
+                        log_txt = log("另存为 按钮检测失败")
+                        log_type = "failed"
+                        self.log_txt_output(log_type, log_txt)
+                        return False
                 if not self.wait_disappear(save_handle, self.pop_timeout):
                     log_txt = log("保存窗口退出失败")
                     log_type = "failed"
@@ -815,7 +794,7 @@ class UIController:
                                   VK_RETURN, activate=False)  # 如果跳出询问弹窗
                     self.wait_window(current_handle, self.pop_timeout, self.main_window_clue, txt_mode=True)
                 log_txt = log("保存成功: \n", new_name, output_message)
-                log_type = "success"
+                log_type = "save"
                 self.log_txt_output(log_type, log_txt)
                 return True
             else:
@@ -983,9 +962,8 @@ class UIController:
             self.log_txt_output(log_type, log_txt)
             return False
 
-    def wait_win32_window(self, timeout, clue, get_txt = False, false_mode = True):
+    def wait_win32_window(self, timeout, clue, false_mode = True):
         try:
-            found = False
             start = time.time()
             while time.time() - start < timeout:
                 hwnd = win32gui.FindWindow("#32770", None)
@@ -993,31 +971,37 @@ class UIController:
                     found = hwnd
                     title = win32gui.GetWindowText(hwnd)
                     if clue in title:
-                        if get_txt:
-                            result = get_filename_edit_handle(hwnd)
-                            if result:
-                                return hwnd, result
-                        else:
                             return hwnd
-            if get_txt and found:
-                log_txt = log("获取",clue,"文本超时")
+            if false_mode:
+                log_txt = log("等待",clue,"弹窗超时")
                 log_type = "failed"
                 self.log_txt_output(log_type, log_txt)
-                return found, ""
-            else:
-                if false_mode:
-                    log_txt = log("等待",clue,"弹窗超时")
-                    log_type = "failed"
-                    self.log_txt_output(log_type, log_txt)
-                if get_txt:
-                    return False, False
-                else:
-                    return False
+            return False
         except Exception as e:
             log_txt = log("error: ", traceback.format_exc())
             log_type = "failed"
             self.log_txt_output(log_type, log_txt)
             return False
+
+    def wait_win32_component(self, root_handle, class_name, get_text = False):
+        try:
+            start = time.time()
+            while time.time() - start < self.ui_timeout:
+                handle, text = find_child_window(root_handle,class_name,get_text=get_text)
+                if handle is not None:
+                    if not get_text:
+                        return handle, text
+                    elif text is not None:
+                        return handle, text
+            log_txt = log(class_name,"组件搜索超时")
+            log_type = "failed"
+            self.log_txt_output(log_type, log_txt)
+            return None, None
+        except Exception as e:
+            log_txt = log("error: ", traceback.format_exc())
+            log_type = "failed"
+            self.log_txt_output(log_type, log_txt)
+            return None, None
 
     def wait_window_change(self, rect, last_imp):
         try:
@@ -1026,16 +1010,16 @@ class UIController:
                 current_imp = ImageGrab.grab(bbox=rect)
                 selected_delta_rect, selected_imp = find_changed_region(last_imp, current_imp)
                 if selected_delta_rect is not None and selected_imp is not None:
-                    return selected_delta_rect, selected_imp
+                    return current_imp
             log_txt = log("下箭头事件超时")
             log_type = "failed"
             self.log_txt_output(log_type, log_txt)
-            return False, False
+            return False
         except Exception as e:
             log_txt = log("error: ", traceback.format_exc())
             log_type = "failed"
             self.log_txt_output(log_type, log_txt)
-            return False, False
+            return False
 
     def wait_paste(self, text = None):
         try:
@@ -1065,13 +1049,32 @@ class UIController:
                 win32clipboard.CloseClipboard()
                 return True
             except Exception as e:
-                time.sleep(self.wait_retry_clear_clipboard)
+                time.sleep(self.minimal_ask)
             finally:
                 try:
                     win32clipboard.CloseClipboard()
                 except Exception as e:
                     pass
         return False
+
+    def check_edit(self, edit, target):
+        try:
+            start = time.time()
+            while time.time() - start < self.ui_timeout:
+                length = win32gui.SendMessage(edit, WM_GETTEXTLENGTH, 0, 0)
+                buffer = ctypes.create_unicode_buffer(length + 1)
+                win32gui.SendMessage(edit, WM_GETTEXT, length + 1, buffer)
+                if buffer.value == target:
+                    return True
+            log_txt = log("等待文件名输入栏更新超时")
+            log_type = "failed"
+            self.log_txt_output(log_type, log_txt)
+            return False
+        except Exception as e:
+            log_txt = log("error: ", traceback.format_exc())
+            log_type = "failed"
+            self.log_txt_output(log_type, log_txt)
+            return False
 
     def activate_window(self, handle):
         """
@@ -1162,9 +1165,12 @@ class UIController:
             if not os.path.exists(self.current_txt_path):
                 with open(self.current_txt_path, "w") as f:
                     f.write(self.current_name + "\n")
-            self.current_log_path = os.path.dirname(parent_path) + "\\" + os.path.basename(parent_path) + "-log.csv"
-            self.logger = CSVLogger(self.current_log_path, columns=self.headers)
-            self.logger.add_row(self.current_name)
+            error_log_path = os.path.dirname(parent_path) + "\\" + os.path.basename(parent_path) + "-log.csv"
+            self.logger["error"] = CSVLogger(error_log_path, columns=self.headers)
+            self.logger["error"].add_row(self.current_name)
+            success_log_path = os.path.dirname(parent_path) + "\\" + os.path.basename(parent_path) + "-num.csv"
+            self.logger["success"] = CSVLogger(success_log_path, columns=self.headers)
+            self.logger["success"].add_row(self.current_name)
             return True
         except Exception as e:
             log_txt = log("error: ", traceback.format_exc())
@@ -1180,29 +1186,37 @@ class UIController:
         self.current_failed = None
         self.current_invalid = None
         self.current_log_data = None
-        self.current_log_path = None
         self.current_txt_path = None
         self.show_hide_handle = None
         self.guide_bar_handle = None
-        self.logger = None
+        self.logger = {"error": None,
+                       "success": None}
         self.current_index = 0
         self.current_rename = 0
         self.current_tasks = [{}]
         self.current_hole_fill_tasks = []
         self.current_name_list = []
         self.log_dict = {
-            "success": [0, ""],
+            "success": [0, 0],
             "failed": [0, ""],
             "invalid": [0, ""],
         }
 
-    def time_output(self, step, start):
+    def end_log(self, step, start):
         start_readable = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start))
         end = time.time()
         end_readable = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(end))
         elapsed = str(end - start)
         log_txt = elapsed + "\n" + start_readable + "\n" + end_readable + "\n"
-        self.logger.update_last(step, log_txt)
+        failed = ""
+        if self.log_dict["failed"][0] > 0:
+            failed = "报错：" + str(self.log_dict["failed"][0]) + "\n"
+        error_txt = failed + log_txt
+        self.logger["error"].update_last(step, error_txt)
+        self.logger["error"].save()
+        success_txt = "任务数量：" + str(self.log_dict["success"][1]) + "\n" + log_txt
+        self.logger["success"].update_last(step, success_txt)
+        self.logger["success"].save()
 
     def todo(self, step, func, *args, **kwargs):
         result = func(*args, **kwargs)
@@ -1214,19 +1228,26 @@ class UIController:
             if self.log_dict["failed"][0] > 0:
                 log_txt += "\nfailed: \n"
                 log_txt += self.log_dict["failed"][1]
-            self.logger.update_last(step, log_txt)
+            self.logger["error"].update_last(step, log_txt)
+        if self.log_dict["success"][0] > 0:
+            self.logger["success"].update_last(step, str(self.log_dict["success"][0]))
+        sum_num = self.log_dict["success"][1]
+        sum_num += self.log_dict["success"][0]
         self.log_dict = {
-            "success": [0, ""],
+            "success": [0, sum_num],
             "failed": [0, ""],
             "invalid": [0, ""],
         }
         return result
 
     def log_txt_output(self, log_type, log_txt):
-        self.log_dict[log_type][0] += 1
-        self.log_dict[log_type][1] += log_txt
-        with open(self.current_txt_path, "a") as f:
-            f.write(log_type + "-" + str(self.log_dict[log_type][0]) + ": " + log_txt + "\n")
+        if log_type != "success" and log_type != "save":
+            self.log_dict[log_type][0] += 1
+            self.log_dict[log_type][1] += log_txt
+            with open(self.current_txt_path, "a") as f:
+                f.write(log_type + "-" + str(self.log_dict[log_type][0]) + ": " + log_txt + "\n")
+        elif log_type == "save":
+            self.log_dict["success"][0] += 1
 
     def log_imp_output(self, log_type, handle):
         try:
@@ -1242,10 +1263,19 @@ class UIController:
     def clear(self):
         try:
             current_root_handle = win32gui.GetForegroundWindow()
-            menu_handle = self.search_menu(current_root_handle,None,"关闭项目文件",self.window_dict["menu_close"],q_mode=True)
+            menu_handle = self.search_menu(self.main_handle,None,"关闭项目文件",self.window_dict["menu_close"],q_mode=True)
+            if not menu_handle:
+                current_handle = win32gui.GetForegroundWindow()
+                self.keyboard(current_handle, VK_RETURN)
+                self.wait_disappear(current_handle, self.pop_timeout)
+                log_txt = log("关闭时检测到窗口异常")
+                log_type = "failed"
+                self.log_txt_output(log_type, log_txt)
+                self.log_imp_output(log_type, self.main_handle)
+                menu_handle = self.search_menu(self.main_handle, None, "关闭项目文件", self.window_dict["menu_close"],q_mode=True)
             if menu_handle:
                 self.keyboard(menu_handle,VK_RETURN)
-                time.sleep(self.wait_ui_done) # 释放事件，防止UI饿死
+                time.sleep(self.wait_click) # 释放事件，防止UI饿死
                 close_handle = self.wait_window(current_root_handle,self.pop_timeout,self.window_dict["close"])
                 if close_handle:
                     self.keyboard(close_handle, VK_RETURN)

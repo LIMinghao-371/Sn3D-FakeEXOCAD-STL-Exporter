@@ -222,26 +222,34 @@ def get_all_top_hwnds():
     win32gui.EnumWindows(callback, None)
     return set(hwnds)
 
+def find_child_window(dlg, class_name, get_text=True):
+    """
+    在指定窗口的子控件中，查找第一个符合条件的窗口。
+    参数:
+        dlg: 父窗口句柄
+        class_name: 类名（如 "Edit", "Button"），为 None 则忽略
+        text_contains: 窗口文本必须包含该字符串（模糊匹配），为 None 则忽略
+        text_exact: 窗口文本必须完全等于该字符串（精确匹配），为 None 则忽略
+        get_text: 是否返回窗口文本（如果为 False，只返回句柄）
+    返回:
+        如果找到，返回 (hwnd, text) 或 (hwnd, None)（若 get_text=False）
+        未找到返回 (None, None)
+    """
+    result = [None, None]  # [hwnd, text]
 
-def get_filename_edit_handle(dlg):
-    result_text = [None]
     def enum_callback(hwnd, _):
-        if win32gui.GetClassName(hwnd) == "Edit":
-            print(win32gui.GetWindowText(hwnd))
-            length = win32gui.SendMessage(hwnd, WM_GETTEXTLENGTH, 0, 0)
-            if length > 0:
-                buffer = ctypes.create_unicode_buffer(length + 1)
-                win32gui.SendMessage(hwnd, WM_GETTEXT, length + 1, buffer)
-                text = buffer.value
-                if text:  # 非空则认为是文件名
-                    result_text[0] = text
-                    return False  # 停止枚举
-        return True
+        if win32gui.GetClassName(hwnd) != class_name:
+            return True  # 继续枚举
+        length = win32gui.SendMessage(hwnd, WM_GETTEXTLENGTH, 0, 0)
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        win32gui.SendMessage(hwnd, WM_GETTEXT, length + 1, buffer)
+        text = buffer.value
+        result[0] = hwnd
+        result[1] = text if get_text else None
+        return False  # 停止枚举
+
     win32gui.EnumChildWindows(dlg, enum_callback, None)
-    if result_text[0]:
-        return result_text[0]
-    else:
-        return False
+    return tuple(result)  # (hwnd, text) 或 (None, None)
 
 def key2str(vk_code):
     """将虚拟键码转换为人类可读的字符串名称（用于可视化/日志）。"""
@@ -327,7 +335,7 @@ class CSVLogger:
                 )
             self.rows = list(reader)
 
-    def _save(self):
+    def save(self):
         """将内存中的所有行覆盖写入 CSV 文件"""
         with open(self.file_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=self.columns)
@@ -341,7 +349,7 @@ class CSVLogger:
         row = {col: '' for col in self.columns}
         row[self.columns[0]] = identifier
         self.rows.append(row)
-        self._save()
+        # self._save()
 
     def update_last(self, column, value):
         """
@@ -352,7 +360,7 @@ class CSVLogger:
         if column not in self.columns:
             raise ValueError(f"列 '{column}' 不存在，可用列: {self.columns}")
         self.rows[-1][column] = value
-        self._save()
+        # self._save()
 
     def get_last_row(self):
         """

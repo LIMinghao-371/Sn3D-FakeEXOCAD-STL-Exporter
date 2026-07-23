@@ -49,21 +49,21 @@ class BatchExporter:
         name = []
         # name.append("001_高春峰" )  # 非法数据
         # name.append("1012罗志惠" )  # 超级非法数据
-        # name.append("1003崔智森" )  # 报错了
+        name.append("1003崔智森" )  # 报错了
         # name.append("1043曹忠厚1")  # 报错了
         # name.append("1015陈英琢" )  # 合并 单个牙齿，测试识别模式
-        # name.append("1135毛晓燕" )  # 合并 多个基台，测试识别模式。 多个扫描杆。 牙龈 取舍。解刨形态。
+        name.append("1135毛晓燕" )  # 合并 多个基台，测试识别模式。 多个扫描杆。 牙龈 取舍。解刨形态。
         # name.append("1013郭佩琳" )  # 扫描模型 取舍。 ?<----
         # name.append("1107王奕麟" )  # 合并 单个基台，测试识别模式
         # name.append("1218谭卉"  )   # 合并 单个基台，测试识别模式
-        # name.append("1207马凤良" )  # 多又全， 一个合并多个数据，有扫描杆
+        name.append("1207马凤良" )  # 多又全， 一个合并多个数据，有扫描杆
         # name.append("1187王宪英1")  # 合并，两颗牙 无扫描杆 一个解刨内冠，一个单颗合并
         # name.append("1040赵景波" )  # 合并，基台 和 修复体 <-- 合并部分菜单不对
         # name.append("1042夏德斌" )  # 合并，基台 和 修复体
         # name.append("1045韩金"  )   # 合并，只有单个基台，有扫描杆
-        # name.append("1051李民"  )   # 合并，上下基台
+        name.append("1051李民"  )   # 合并，上下基台
         # name.append("1047闫"   )   # 两个 合并蜡型, 一个解刨内冠，一个合并
-        # name.append("1006安成江"  ) # 报错
+        name.append("1006安成江"  ) # 报错
         # name.append("1013齐涣泽"  ) # 报错
         # name.append("1059张明明"  )  # 报错
         # name.append("1063蔡雨文"  )  # 报错
@@ -74,8 +74,8 @@ class BatchExporter:
                     for file_name in os.listdir(sub_path):
                         if self.file_type in file_name:
                             file_path = sub_path + "\\" + file_name
-                            # if name is not None and sub_name not in name:
-                            #     continue
+                            if name is not None and sub_name not in name:
+                                continue
                             # else:
                             #     name = None
                             result = self.UIController.process(file_path, sub_name)
